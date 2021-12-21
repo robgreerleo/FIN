@@ -1,0 +1,159 @@
+---
+title: "Risk Management"
+subtitle:  Rob Leonard (robleonard@tamu.edu)
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+# Question 1: Parametric Estimation with Portfolio
+**Initial setup.**   
+```{r}
+library(MASS); options(warn = -1)
+load("HW06.Rdata") 
+ls()
+
+# setup skewness and kurtosis functions from HW 02
+Sk.fun <- function(x) { ## function to compute skewness from HO 3
+  mean((x-mean(x))^3/sd(x)^3)
+}
+Kur.fun <- function(x){ ## function to compute kurtosis
+  mean((x-mean(x))^4/sd(x)^4)
+}
+
+stat           = matrix(ncol = dim(rt)[2], nrow=4)
+rownames(stat) = c("skew","kurt","nu","se.nu")
+colnames(stat) = colnames(rt)
+for (i in 1:dim(rt)[2]){
+  stat[1,i] = Sk.fun(rt[,i])
+  stat[2,i] = Kur.fun(rt[,i])
+  fit       = fitdistr(rt[,i], "t")
+  stat[3,i] = fit$estimate[3]
+  stat[4,i] = fit$sd[3]
+}  
+stat
+```
+  
+**1a) Fit a multivariate-t model to the returns in rt. Show all the MLE's.**
+```{r}
+library(mnormt)
+df         = seq(3.5,5.5, 0.01)
+loglik_p   = c()
+for (i in 1:length(df)) {
+  fit = cov.trob(rt, nu = df[i])  
+  loglik_p[i] = sum(dmt(rt, mean = fit$center, S = fit$cov, df = df[i], log = T))
+}
+nu       = df[which.max(loglik_p)]
+cat("The MLE of degrees of freedom:", paste(nu), "\n" )
+est = cov.trob(rt, nu = nu, cor = T)
+cat("The MLE of the mean:\n")
+round(est$center,5) ## MLE of mean vector  
+cat("\n","The MLE of the scale matrix lambda:\n")
+round(est$cov,5)  
+cat("\n","The MLE of Cov:\n") 
+round(est$cov*nu/(nu-2),5)
+```
+  
+**1b) What is the distribution of the return of this portfolio? Please include all the parameter estimates.**  
+```{r}
+mu.f = 3/253   # risk free daily return
+wtadj = c(wt[1],wt[9],wt[7],wt[5],wt[3],wt[2],wt[8],wt[4],wt[6])  # wts in different order than rt
+wtadj
+# sum(wt[2:9])  # risky weights only sum to .9, which is what we invest in the risky asset portfolio
+mu.P = .1*mu.f+sum(wtadj[2:9]*est$center)   # 10% risk free, 90% risky (already 90% in risky)
+lambda.P = sqrt((wtadj[2:9])%*%est$cov%*%(wtadj[2:9]))  # weights already only sum to 90%
+sig.P = lambda.P*sqrt(nu/(nu-2))
+cat("\n Parametric estimates of portfolio:\n")
+c(mean = mu.P, risk = sig.P,scale = lambda.P, DF = nu)
+```
+  
+The distribution is a t distribution with estimated portfolio mean daily return of 0.098, estimated scale or lambda of 0.7098, risk of 0.9918 and estimated degrees of freedom of 4.1.  
+  
+**1c) **  
+```{r}
+alpha = seq(.01,.05, .01)
+S = 500000/100
+q.t = qt(alpha, df = nu)
+VaR.P = c()   # set up results vector storage
+ES.P = c()    # set up results vector storage
+for (i in 1:length(alpha)){
+  VaR.P[i] = -S*(mu.P + lambda.P*q.t[i])
+  ES.P[i] = S*(-mu.P+lambda.P*dt(q.t[i],nu)/alpha[i]*(nu+q.t[i]^2)/(nu-1))
+}
+cat("one-day risk estimates for: \n")
+rbind(alpha,VaR.P,ES.P)
+```
+  
+# Question 2: Single Stock
+**2a) Compute the estimated one-day VaR and ES using nonparametric estimation.**  
+```{r}
+q = quantile(yt, alpha)
+S = 200000/100
+VaR.np = c()
+ES.np = c()
+for (i in 1:length(alpha)){
+  VaR.np[i] = -S*q[i]
+  ES.np[i] = -S*mean(yt[yt < q[i]])
+}
+cat("Nonparametric estimates:\n ")
+rbind(q, VaR.np,ES.np)  
+```
+  
+**2b) Parametric estimation with a t distribution.**  
+```{r}
+library(MASS)
+fit.t2b = fitdistr(yt, "t")         # fit univariate t
+cat("\n")
+fit.t2b$est
+mu2b = fit.t2b$est["m"]
+lambda2b = fit.t2b$est["s"]
+nu2b = fit.t2b$est["df"]
+q.t2b = qt(alpha, df = nu2b)
+VaR.t2b = -S*(mu2b + lambda2b*q.t2b)
+ES.t2b = S*(-mu2b+lambda2b*dt(q.t2b,nu2b)/alpha*(nu2b+q.t2b^2)/(nu2b-1))
+cat("\n","Parametric t estimates:\n ")
+rbind(q.t2b, VaR.t2b,ES.t2b)  
+```
+  
+**2c) **  
+```{r, fig.width=8, fig.height=8}
+par(mfrow   = c(3, 2))
+yt2c = sort(as.numeric(yt)) # sort from smallest to largest
+m = c(50,100,200,300,400)
+n = length(yt2c)
+out2c = matrix(nrow = 3, ncol = 5)
+dimnames(out2c)[[1]] = c("corr", "slope","ahat")
+dimnames(out2c)[[2]] = paste("m", m, sep = " = ")
+for(i in 1:5){
+  x = log((1:m[i])/n)
+  y = log(-yt2c[1:m[i]])
+  out2c[1,i] = cor(x,y)
+  out2c[2,i] = lsfit(x,y)$coef[2] ## ols estimate of slope
+  plot(x,y, main = c("m=",m[i]), xlab = "log(k/n)", ylab="log(-R(k))")
+  abline(lsfit(x,y)$coef)
+}
+out2c[3,] = -1/out2c[2,] ## ahat = -1/slope
+out2c
+```
+  
+Choose m = 200 as this is the most linear of the 5 plots.  Calculate non parametric VaR0 piece:   
+  
+```{r}
+a = out2c["ahat","m = 200"]
+alpha0 = 0.1   # alpha 0 needs to be greater than any alpha in the vector (0.1 will work)
+VaR0 = -S*quantile(yt2c,alpha0)
+cat("Nonparametric estimates: ", paste(c("0.1-quantile","\t VaR(.1)"),
+round(c(quantile(yt2c,alpha0), VaR0), 4), sep = " = "))
+```
+  
+Calculate VaR and ES by combining parametric and nonparametric pieces:  
+```{r}
+VaR = VaR0*(alpha0/alpha)^(1/a) 
+names(VaR) = paste(alpha)
+ES = a/(a-1)*VaR
+cat("Semiparametric Risk Estimate for alpha = ", alpha, ":", "\n")
+rbind(VaR,ES)
+```
+  
+  
+

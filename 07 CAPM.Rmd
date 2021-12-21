@@ -1,0 +1,125 @@
+---
+title: "CAPM"
+subtitle:  Rob Leonard (robleonard@tamu.edu)
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+# Question 1: CAPM by Individual Asset
+**1a) Give the estimates of betas for all 8 assets**   
+```{r}
+load("HW07.Rdata")
+ls()
+n = dim(Rt)[1]
+N = dim(Rt)[2]
+Yt = apply(Rt, 2, function(u) u-Rf) 
+YM = RM - Rf                         
+fit = lm(Yt ~ YM)
+coef(fit)  
+```
+  
+The 2 assets with the **highest** Betas are MU and PII (Micron Technologies and Polaris Industries).  
+The 2 assets the the **lowest** Betas are JNJ and MCD (Johnson and Johnson and McDonald's).  
+  
+**1b) Give the proportion of the square risk that is due to the systematic risk for each asset.**  
+```{r}
+sfit = summary(fit)
+alpha = sfit[[1]]$coef[1,]
+R.Sq = sfit[[1]]$r.sq  
+for (i in 2:N) {
+  alpha= rbind(alpha, sfit[[i]]$coef[1,]) 
+  R.Sq = c(R.Sq, sfit[[i]]$r.sq) 
+}
+dimnames(alpha)[[1]] = syb
+names(R.Sq) = syb 
+cat("\n R-Squared:\n")
+R.Sq
+```
+  
+The R-Squared values listed above are the proportion of the square risk that is due to systematic risk.  For example, Ambev S.A.'s proportion attributed to systemic risk is .2949 or 29.49%.  
+    
+**1c) Give the estimates for the excess return based on the model.**  
+```{r}
+um = as.vector(apply(RM,2,mean))   # caclculate average market return
+uf = as.vector(apply(Rf,2,mean))   # caclculate average risk free return
+Excessj = c()
+for (i in 1:N){
+  Excessj[i] = (sfit[[i]]$coef[2,1])*(um-uf)
+}
+names(Excessj) = syb
+cat("Estimated excess return:\n ")
+Excessj
+```
+  
+**1d) Test if the CAPM holds for each individual asset.**  
+```{r}
+dimnames(alpha)[[1]] = syb
+cat("Test for individual alpha = 0:\n ") 
+alpha
+```
+  
+The hypotheses of the tests are that each individual $\alpha_i$=0, so $H_0: \alpha_i=0$ $\forall i =1 to 8$.  
+If we assume an $\alpha=.05$ level, then only HD (Hyatt Hotels) doesn't follow CAPM as the p-value is below .05 at .02 indicating we have significant evidence to reject the null hypothesis that the intercept term is 0 and thus Hyatt's stock doesn't follow CAPM.  
+  
+**1e) Compute sample mean excess returns for each security and compare to part (c).** 
+```{r}
+cat("Average excess return:\n ")
+apply(Yt,2,mean)  
+```
+  
+The magnitude of the estimated excess returns aren't all that close to the actuals, but their rankings are fairly accurate.  For example, the top 3 stocks in terms of estimated average excess returns by the CAPM model are MU, PII and HD.  These are the top 3 stocks in terms of actual average excess returns (although in different rank order).  Similarly, these same three stocks have the highest estimated betas. 
+  
+The magnitudes of the excess return may be off as the systematic component of the risk only accounts for at most 60% for HD (and only 36 and 44% for MU and PII) indicating that unique risk factors may play an outsized role in higher excess returns during this period. Also, we determined in part 1d that CAPM wasn't accurately modeling HD.
+  
+# Question 2: CAPM for Portfolio  
+**2a) Test if the CAPM holds for the 8 assets as a whole using both the Wald and likelihood ratio tests. Are the test results the same as what you expected?**  
+```{r}
+ahat = alpha[,"Estimate"] 
+Sig = 1/n*t(resid(fit))%*%resid(fit) 
+wald = (n-N-1)/N*(1+mean(YM)^2/as.vector(var(YM)))^(-1)*t(ahat)%*%solve(Sig)%*%ahat
+fit0 = lm(Yt ~ YM -1)
+Sig0 = 1/n*t(resid(fit0))%*%resid(fit0) 
+lr = (n-N/2-2)*(log(det(Sig0))-log(det(Sig))) 
+cat("Wald test: ", paste(c("statistic", "p-value"),round(c(wald,1-pf(wald, N, n-N-1)),5), sep = " = "))
+cat("\n Likelihood ratio test:", paste(c("statistic", "p-value"),round(c(lr, 1-pchisq(lr, N)),5), sep = " = "))
+```
+  
+The results are the same in terms of p-value for both Wald and LRT.  We do not reject the null hypothesis that the portfolio follows CAPM.  We do not have sufficient evidence to reject the null hypothesis that CAPM applies.  
+This is not the same as expected as we found that CAPM didn't hold for the individual Hyatt Hotels stock in Question 1. But it appears that it does hold well enough for the overall portfolio.  
+  
+**2b) What are the estimated systematic component and unique component of the risk of the portfolio's excess returns.**  
+```{r}
+betas = as.vector(coef(fit)[2,])
+sytemRisk = (as.vector(var(YM)))*(betas)%*%t(betas)
+cat("\n Systematic Component of Risk: \n")
+sytemRisk
+uniqueRisk = diag(diag(Sig))
+dimnames(uniqueRisk)[[1]] = dimnames(uniqueRisk)[[2]] = syb
+cat("\n Unique Component of Risk: \n")
+uniqueRisk
+```
+  
+**2c) Find the portfolio that minimizes the unique risk of Yt allowing short selling.**  
+```{r}
+library(quadprog)
+Amat = as.matrix(rep(1,N))
+out = solve.QP(Dmat = uniqueRisk, dvec = rep(0,N), Amat = Amat, bvec = 1, meq = 1)
+weights2c = round(out$solution,6)
+names(weights2c) = syb
+cat("\n The portfolio weights to minimize unique risk are:\n")
+weights2c
+cat("\n The unique risk component of this portfolio is: \n")
+sqrt(2*out$value)  
+```
+  
+**2d) Give a Wald test to check if the CAPM holds for the 2 portfolios.**  
+```{r}
+p = 2
+Wt = cbind(c(weights2c),rep(1/8,N))
+wald2d = ((n-p-1)/p)*((1+mean(YM)^2/as.vector(var(YM)))^(-1))*t(t(Wt)%*%ahat)%*%((t(Wt)%*%uniqueRisk%*%Wt)^(-1))%*%(t(Wt)%*%ahat)
+cat("Wald test: ", paste(c("statistic", "p-value"),round(c(wald2d,1-pf(wald2d, p, n-p-1)),5), sep = " = "))
+```
+    
+With a very low p-value of 0.0008, we reject the null hypothesis that the CAPM holds for the 2 portfolios.  
+

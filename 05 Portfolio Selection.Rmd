@@ -1,0 +1,219 @@
+---
+title: "Portfolio Selection"
+subtitle: Rob Leonard (robleonard@tamu.edu)
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+# Question 1: R Lab 7.13.1 Problem 1
+**Initial setup.**   
+```{r}
+library(quantmod); options("getSymbols.warning4.0"=FALSE)
+syb          = c("AMZN", "MMM", "BA", "V", "UNH","MU")
+d            = length(syb)
+y            = c()
+for(i in 1:d) {
+  getSymbols(syb[i], from = "2009-01-01", to = "2021-03-01")
+  y = cbind(y, weeklyReturn(Ad(get(syb[i])), type = "log")[-1])
+}
+colnames(y)  = syb
+y            = as.matrix(y) ## remove xts class
+y            = 100*y   ## change return to percentages
+colnames(y)  = c("Amazon","3M", "Boeing", "Visa", "UnitedHealth", "MicronTech")  
+```
+  
+**a) Find the minimum variance portfolio: its expect return, its risk and allocation weights.**  
+```{r}
+library(quadprog)
+y.mu         = apply(y,2,mean)
+y.S2         = var(y)
+mu.R         = seq(-0.1,1, .001)  # set search grid
+sd.R         = c()
+wmat         = matrix(nrow=length(mu.R), ncol = d)
+Amat         = cbind(y.mu, rep(1,d))
+for(i in 1:length(mu.R)){
+  result = solve.QP(Dmat = y.S2, dvec = rep(0,d), Amat=Amat, bvec = c(mu.R[i],1), meq = 2);
+  sd.R[i] = sqrt(2*result$value)
+  wmat[i,] = result$solution
+}
+i.min       = which.min(sd.R)
+cat("The minimum variance portfolio:\n mean = ", mu.R[i.min], " risk =",sd.R[i.min], "\n weights:\n"); round(wmat[i.min,],4)
+```
+  
+The minimum variance portfolio has 13.87% allocated to Amazon, 54.84% to 3M, -8.72% short selling BA, 29.03% to Visa, 14.69% to United Health and -3.71% short selling Micron.  The expected mean weekly return is 0.358% and risk is 2.59.
+    
+**b) Find the tangency portfolio: its expected return, its risk and allocation weights with risk free asset included.**  
+```{r}
+mu.f       = (.03*100)/52  # 3% converted to percent then / 52 weeks
+sharpe     = (mu.R - mu.f)/sd.R
+i.T        = which.max(sharpe)
+cat("The tangency portfolio:\n mean = ", mu.R[i.T], " risk =",
+sd.R[i.T], "\n weights:\n"); round(wmat[i.T,],4)  
+```
+  
+The tangency portfolio has 52.29% allocated to Amazon, -25.34% short selling 3M, -16.42% short selling BA, 46.54% to Visa, 33.12% to United Health and 9.81% to Micron.  The expected mean weekly return is 0.631% and risk is 3.58. 
+    
+**c) Plot the efficient frontier, the tangency portfolio, the minimum variance portfolio, location of each stock in the plot.**  
+```{r,fig.width=6, fig.height=6}
+plot(sd.R,mu.R,type="l",xlim=c(0,8),ylim=c(0,1), xlab="Risk", ylab="Avg. Weekly Returns", main="Fig. 1c")
+points(0,mu.f,cex=2,col="blue",pch="*")
+ind = (sharpe == max(sharpe)) # locates the tangency portfolio
+lines(c(0,sd.R[ind]),c(mu.f,mu.R[ind]),col="red",lwd=3)
+points(sd.R[ind],mu.R[ind],col="blue",cex=2,pch="*")
+ind2 = (sd.R == min(sd.R))
+points(sd.R[ind2],mu.R[ind2],col="green",cex=2,pch="*")
+ind3 = (mu.R > mu.R[ind2])
+lines(sd.R[ind3],mu.R[ind3],type="l",xlim=c(0,.25),
+ylim=c(0,.3),col="cyan",lwd=3)
+text(sqrt(y.S2[1,1]),y.mu[1],"Amazon", cex=0.8)
+text(sqrt(y.S2[2,2]),y.mu[2],"3M", cex=0.8)
+text(sqrt(y.S2[3,3]),y.mu[3],"Boeing", cex=0.8)
+text(sqrt(y.S2[4,4]),y.mu[4],"Visa", cex=0.8)
+text(sqrt(y.S2[5,5]),y.mu[5],"UnitedHealth", cex=0.8)
+text(sqrt(y.S2[6,6]),y.mu[6],"MicronTech", cex=0.8)
+legend("topleft",c("efficient frontier","efficient portfolios", "tangency portfolio","min var portfolio"), lty=c(1,1,NA,NA), lwd=c(1,1,1,1), pch=c("","","*","*"), col=c("cyan","red","blue","green"), pt.cex=c(1,1,1,1))
+```
+    
+**d) Find the efficient portfolio of an allowed risk 2%. Compute its return.**  
+```{r}
+w_p = 2.0/sd.R[i.T] # risk allowed: sig_p = 2.0
+cat("The maximum return of portfolio with risk 2.0 is:",
+round((1-w_p)*mu.f + w_p*mu.R[i.T],4), "\n The weights are:\n");
+round(c(risk_free = (1-w_p), w_p*wmat[i.T,]),4)  
+```
+  
+The efficient portfolio with risk = 2% has 44.21% allocated to treasury bills,  29.17% to Amazon, -14.14% short selling 3M, -9.16% short selling BA,  25.96% to Visa, 18.48% to United Health and 5.47% to Micron.  The expected mean weekly return is 0.4421% and risk is 2.0. 
+  
+**e) Find the efficient portfolio of a target return 0.45%. Compute its risk.**  
+```{r}
+w_p = (0.45-mu.f)/(mu.R[i.T]-mu.f) # target return: mu_p = 0.45%
+cat("The lowest risk with 0.45% return is:", round(w_p*sd.R[i.T],4),
+"\n The weights are:\n");round(c(risk_free = (1-w_p), w_p*wmat[i.T,]),4)  
+```
+  
+The efficient portfolio with a return of 0.45% has 31.57% allocated to treasury bills,  35.78% to Amazon, -17.34% short selling 3M, -11.24% short selling BA,  31.85% to Visa, 22.66% to United Health and 6.72% to Micron.  The expected mean weekly return is 0.45% and risk is 2.4532. 
+  
+**f) Find the efficient portfolio of a target return 0.8%. Compute its risk.**  
+```{r}
+w_p = (0.8-mu.f)/(mu.R[i.T]-mu.f) # target return: mu_p = 0.80%
+cat("The lowest risk with 0.80% return is:", round(w_p*sd.R[i.T],4),
+"\n The weights are:\n");round(c(risk_free = (1-w_p), w_p*wmat[i.T,]),4)   
+```
+  
+The efficient portfolio with a return of 0.8% would require short selling treasuries (or borrowing at the risk free rate), **which is not possible** (for almost all investors). We'd need to utilize a portfolio that excludes the risk free rate which would just utilize the stocks in our portfolio set and short selling.   
+  
+```{r}
+cat("The lowest risk with 0.80% return is:", round(sd.R[which(mu.R==0.80)],4),
+"\n The weights are:\n");round(c(risk_free = 0, wmat[which(mu.R==0.80),]),4)
+```
+  
+The efficient portfolio with a return of 0.8% has 0% allocated to treasury bills,  76.07% to Amazon, -74.97% short selling 3M, -21.19% short selling BA,  57.38% to Visa, 44.53% to United Health and 18.19% to Micron.  The expected mean weekly return is 0.8% and risk is 4.77.  This higher return target requires a very large amount of short selling.
+  
+# Question 2: Repeat Question 1 but with no short selling allowed.
+**a) Find the minimum variance portfolio: its expect return, its risk and allocation weights.**
+```{r}
+mu.R        = seq(round(min(y.mu),3), max(y.mu), 0.001) ## for positive w
+Amat        = cbind(y.mu, rep(1,d), diag(rep(1,d))) ## for positive w
+sd.R        = c()
+wmat        = matrix(nrow = length(mu.R), ncol = d)
+for(i in 2:length(mu.R)){
+  bvec = c(mu.R[i],1, rep(0,d)) ## for positive w
+  result = solve.QP(Dmat = y.S2, dvec = rep(0,d), Amat=Amat, bvec = bvec, meq = 2)
+  sd.R[i] = sqrt(2*result$value)
+  wmat[i,] = result$solution
+}
+i.min       = which.min(sd.R)
+cat("The minimum variance portfolio:\n mean = ", mu.R[i.min], " risk =",sd.R[i.min], "\n weights:\n"); round(wmat[i.min,],4)
+```
+  
+The minimum variance portfolio exlcudes any investment in Boeing and Micron, which were identified as stocks to short sell in problem 1b.  
+  
+**b) Find the tangency portfolio: its expected return, its risk and allocation weights with risk free asset included.**  
+```{r}
+mu.f = 3/52
+sharpe = (mu.R - mu.f)/sd.R
+i.T = which.max(sharpe)
+cat("The tangency portfolio:\n mean = ", mu.R[i.T], " risk =", sd.R[i.T],
+"\n weights:\n"); round(wmat[i.T,],4)
+```
+  
+The tangency portfolio excludes investing in 3M or BA.  
+  
+**c) Plot the efficient frontier, the tangency portfolio, the minimum variance portfolio, location of each stock in the plot.** 
+```{r, fig.width=6, fig.height=6}
+plot(sd.R,mu.R,type="l",xlim=c(0,8),ylim=c(0,1), xlab="Risk", ylab="Avg. Weekly Returns", main="Fig. 2c - Prohibit Short Selling")
+points(0,mu.f,cex=2,col="blue",pch="*")
+ind = (sharpe == max(sharpe[-1]))[-1] # locates the tangency portfolio. remove first lower bound per lecture
+lines(c(0,sd.R[ind]),c(mu.f,mu.R[ind]),col="red",lwd=3)
+points(sd.R[ind],mu.R[ind],col="blue",cex=2,pch="*")
+ind2 = (sd.R == min(sd.R[-1]))[-1]
+points(sd.R[ind2],mu.R[ind2],col="green",cex=2,pch="*")
+ind3 = (mu.R > mu.R[ind2])
+lines(sd.R[ind3],mu.R[ind3],type="l",xlim=c(0,.25),ylim=c(0,.3),col="cyan",lwd=3)
+text(sqrt(y.S2[1,1]),y.mu[1],"Amazon", cex=0.8)
+text(sqrt(y.S2[2,2]),y.mu[2],"3M", cex=0.8)
+text(sqrt(y.S2[3,3]),y.mu[3],"Boeing", cex=0.8)
+text(sqrt(y.S2[4,4]),y.mu[4],"Visa", cex=0.8)
+text(sqrt(y.S2[5,5]),y.mu[5],"UnitedHealth", cex=0.8)
+text(sqrt(y.S2[6,6]),y.mu[6],"MicronTech", cex=0.8)
+legend("topleft",c("efficient frontier","efficient portfolios", "tangency portfolio","min var portfolio"), lty=c(1,1,NA,NA), lwd=c(1,1,1,1), pch=c("","","*","*"), col=c("cyan","red","blue","green"), pt.cex=c(1,1,1,1))
+```
+  
+Fig. 2c is plotted at the same scale as Fig. 1c to allow for comparison.  
+  
+**d) Find the efficient portfolio of an allowed risk 2%. Compute its return.**  
+```{r}
+w_p = 2.0/sd.R[i.T] # risk allowed: sig_p = 2.0
+cat("The maximum return of portfolio with risk 2.0 is:",
+round((1-w_p)*mu.f + w_p*mu.R[i.T],4), "\n The weights are:\n");
+round(c(risk_free = (1-w_p), w_p*wmat[i.T,]),4)
+```
+  
+The efficient portfolio with a 2% risk has no investment in either 3M or BA.  
+  
+**e) Find the efficient portfolio of a target return 0.45%. Compute its risk.**  
+```{r}
+w_p = (0.45-mu.f)/(mu.R[i.T]-mu.f)
+cat("The lowest risk with 0.45% return is:", round(w_p*sd.R[i.T],4),
+"\n The weights are:\n");round(c(risk_free = (1-w_p), w_p*wmat[i.T,]),4)  
+```
+  
+The efficient portfolio with a .45% target return again has no investment in either 3M or BA.  
+  
+**f) Find the efficient portfolio of a target return 0.8%. Compute its risk.**  
+```{r}
+w_p = (0.8-mu.f)/(mu.R[i.T]-mu.f)
+cat("The lowest risk with 0.8% return is:", round(w_p*sd.R[i.T],4),
+"\n The weights are:\n");round(c(risk_free = (1-w_p), w_p*wmat[i.T,]),4)
+```
+  
+This portfolio requires borrowing at the risk free rate and investing the proceeds in the stock portfolio.  It is unlikely though, that any borrowers could borrow at the risk free rate.  We must construct a portfolio similar to 1f utilitzing a large amount of short selling and no investment in the risk free rate, **but since no short selling is allowed, a return of 0.8% is not possible.**  
+  
+# Question 3  
+**Consider again the data in 1, what is the set of feasible expected portfolio returns with the constraints -0.1  <= w <= 0.4 for all i = 1, . . . , 6 .**
+```{r}
+library(linprog)
+b1        = 0.4; b2 = 0.1
+cvec      = c(y.mu, -y.mu)
+Amat.lp   = rbind(diag(2*d), c(rep(1,d), rep(-1,d)))
+bvec.lp   = c(rep(b1,d), rep(b2,d),1)
+inequ     = c(rep("<=", 2*d), "=")
+min.lp    = solveLP(cvec = cvec, bvec = bvec.lp, Amat = Amat.lp, lpSolve=T, const.dir = inequ, maximum = F)
+max.lp    = solveLP(cvec = cvec, bvec = bvec.lp, Amat = Amat.lp, lpSolve=T, const.dir = inequ, maximum = T)
+mu.lim    = c(lower = min.lp$opt, upper = max.lp$opt)
+mu.lim
+```
+  
+The set of feasible expected portfolio returns is from `r mu.lim[1]` to `r mu.lim[2]`.  
+  
+# Question 4
+```{r}
+quad.fun <- function(a,b,c) { ## function to compute quadratic equation
+  c( (-b-sqrt(b^2-4*a*c))/(2*a), (-b+sqrt(b^2-4*a*c))/(2*a) )
+}
+
+round(quad.fun(.1424,-.1924,.055),4)
+```
+
+

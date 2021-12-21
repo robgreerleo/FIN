@@ -1,0 +1,279 @@
+---
+title: "Time Series Models"
+subtitle: Rob Leonard (robleonard@tamu.edu)
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+# Preliminary Setup   
+Download return data for Texas Instruments  
+```{r}
+library("quantmod")
+library("forecast")
+library(rugarch)
+library(patchwork)
+source("ARMAroots_RFunctions.R")
+options(scipen=999)
+
+getSymbols("TXN", from = "2007-01-03", to = "2021-04-01")
+sum(is.na(TXN))   # check for missing values
+Yt = dailyReturn(Ad(TXN), type = "log")[-1]
+head(Yt, 2)
+tail(Yt, 2)
+dim(Yt)
+Acf(Yt^2)         # chech for ARCH/GARCH
+ind = which(time(Yt) == "2016-12-30")
+Yn = Yt[1:ind,]
+dim(Yn)
+save.image("garch.RData")
+```
+  
+# Questions 1  
+**1a) Find a distribution that is the best fit.**  
+```{r}
+dists = c("std", "sstd", "ged", "sged")
+fits = vector("list", 4)
+for(i in 1:4) fits[[i]] = fitdist(dists[i], Yn)
+```
+  
+Plot densities.  
+```{r, , fig.width=8, fig.height=8}
+par(mfrow = c(2, 2))
+den = density(Yn)  # store kernel density estimates
+labels = c("Standardized t", "Skewed t", "GED", "Skewed GED")
+for (i in 1:4) {
+  est = fits[[i]]$pars
+  yvals = ddist(dists[i], den$x, mu = est["mu"], sigma = est["sigma"], skew = est["skew"], shape = est["shape"])
+  plot(den$x, yvals, type="l", lwd=2, col=i+1, xlab="Log Daily Returns", ylab="Density", main=labels[i], xlim = c(-.15,.15), ylim = c(0,35))
+  lines(den$x, den$y, lwd=2, lty=2, col="black") # Kernel Density 
+  legend("topleft", c(labels[i],"KDE"),  lwd=c(2,2), lty=c(1,2), col = c(i+1, "gray"))
+}  
+```
+  
+Either the stardized or skewed t fit the best based on these plots.  The GED and skewed GED are too peaked.  Zoom in on the first 2 plots:  
+```{r, fig.width=8, fig.height=8, fig.asp=.6}
+# zoom in on standardized and skew t peaks
+par(mfrow = c(1,2))
+for (i in 1:2) {
+  est = fits[[i]]$pars
+  yvals = ddist(dists[i], den$x, mu = est["mu"], sigma = est["sigma"], skew = est["skew"], shape = est["shape"])
+  plot(den$x, yvals, type="l", lwd=2, col=i+1, xlab="Log Weekly Returns", ylab="Density", main=labels[i], xlim = c(-.05,.05), ylim = c(0,30))
+  lines(den$x, den$y, lwd=2, lty=2, col="black") # Kernel Density 
+  legend("topleft", c(labels[i],"KDE"),  lwd=c(2,2), lty=c(1,2), col = c(i+1, "gray"), cex=.7)
+}  
+```
+  
+Compute AIC and BIC:  
+```{r}
+AIC_dist  = BIC_dist = rep(0,2)  # set up results vectors
+BIC_dist  = rep(0,2)
+for (i in 1:2) {
+  logLike      = min(fits[[i]]$values)
+  numbParam    = length(fits[[i]]$pars) # count # parameters used for each
+  AIC_dist[i]  = 2*logLike + 2*numbParam  # from p. 54 HO 3 fitdist() gives -loglikelihood,  use last value
+  BIC_dist[i]  = 2*logLike + numbParam*log(length(Yn))  # formulas on p. 55, fix this not length(rt)
+}
+aicStt = round(AIC_dist[1],0)
+bicStt = round(BIC_dist[1],0)
+aicSkt = round(AIC_dist[2],0)
+bicSkt = round(BIC_dist[2],0)
+```
+  
+|         | `r labels[1]`            | `r labels[2]`           |
+|--------:|:------------------------:|:-----------------------:|
+| **AIC** | `r aicStt` |`r aicSkt` |
+| **BIC** | `r bicStt` |`r bicSkt` |  
+  
+AIC has no preference, but BIC ever so slightly prefers the skewed t distribution.  But the skew might not be significant.  Check that skewness is significant.   
+
+```{r}
+sigmaDistb = sqrt(diag(solve(fits[[2]]$hessian)))  # skew is parameter 3 for both distributions
+lowerDistb = fits[[2]]$pars[3] - 1.96*sigmaDistb[3]
+upperDistb = fits[[2]]$pars[3] + 1.96*sigmaDistb[3]
+```
+The 95% CI for skewness for the Skewed t distribution is (`r round(lowerDistb,3)`,`r round(upperDistb,3)`).  
+Since the CI contains 1, we don't have evidence to reject the null hypothesis that the distribution is symmetric.  Thus, the **standardized t distribution** will be used. The paramters are as follows:  
+
+```{r}
+cat("The estimated standarized t distribution parameters are: \n", "mu \t", "sigma \t", "shape \n", round(fits[[1]]$pars,5))
+```
+ 
+  
+**1b) Plot qq plot.**  
+```{r, fig.dim = c(6,6)}
+par(mfrow = c(1, 1))
+n         = length(Yn)
+q_grid    = (1:n) / (n + 1)
+df = fits[[1]]$pars[3]
+returns = as.vector(Yn)
+
+# calc abline for quantile
+temp1 = quantile(qdist(distribution = "std", p=q_grid, mu=fits[[1]]$pars[1], sigma = fits[[1]]$pars[2], shape = fits[[1]]$pars[3]), c(0.25,0.75))
+temp2 = quantile(Yn, c(0.25, 0.75))
+temp3 = lsfit(temp1,temp2)
+
+#qq plot
+qqplot(returns, qdist(distribution = "std", p=q_grid, mu=fits[[1]]$pars[1], sigma = fits[[1]]$pars[2], shape = fits[[1]]$pars[3]), main = paste("Standardized t with df = ", round(df,2)), ylab="t-quantile", xlab="log Daily Returns TXN", xlim = c(-.2,.2), ylim = c(-.2,.2) )
+abline(temp3$coef, col = "gray")
+```
+  
+The QQ plot shows that the standardized t-distribution with 3.6 degrees of freedom fits fairly well to the daily log return data for Texas Instruments, with only very slight deviation in the tails.  
+  
+# Question 2: Fit an ARMA Model    
+**Data Descritption**    
+```{r, fig.width = 10}
+par(mfrow   = c(2, 1))
+plot(Ad(TXN["2007-01-03::2016-12-30"]), main="Adjusted Daily Closing Price - Texas Instruments", col="blue")
+plot(dailyReturn(Ad(TXN["2007-01-03::2016-12-30"]), type="log"), main="Daily Log Returns - Texas Instruments", col="blue")
+```
+  
+The log daily returns are stationary (about 0), but do not exhibit constant variance.  The return variance is clustered during certain time periods and there seems to be occasional correlation.  TXN's returns were hit hard during the 2007-on financial crisis, but not as much during the pandemic.
+  
+  
+**Data Exploration**  
+```{r}
+ggtsdisplay(Yn, points = F, main = "Texas Instruments")
+```
+  
+Lags in periods 1 and 2 are generally the strongest.  AR and MA models with a maximum of 2 would likely work best.  For the autosearch, 4 will be used for conservatism, but models with 3 or 4 are unlikely.  
+
+**Find Candidate Models**  
+```{r}
+auto.arima(Yn, max.p = 4, max.q = 4, seasonal = F, ic ="bic" )
+auto.arima(Yn, max.p = 4, max.q = 4, seasonal = F, ic ="aic" )
+```
+  
+The AIC chosen model isn't reasonable.  The coefficients are simply way too high for the low amount of correlation exhibited in the prior plots.  The BIC model looks more appealing and likely.  The ma2 coefficient from the AIC chosen model also matches up well with the BIC chosen model and is much more reasonable.  Multiple models will be tested further with a maximum of 2 for either/both p and q.  
+
+**Model Selection**  
+Explore 8 different model fits, although some are already fairly unlikely to work.  
+AR models with p = 1,2.  MA models with q = 1,2.  ARMA models with all 4 combinations of p,q.  
+ 
+```{r}
+# MA(1)
+fit.MA1     = Arima(Yn, order = c(0,0,1), seasonal = FALSE, include.mean = FALSE)
+plot.MA1    = autoplot_roots(fit.MA1)
+MA1c1       = as.numeric(round(fit.MA1$coef[1],3))
+MA1AIC      = round(fit.MA1$aicc,0)
+MA1BIC      = round(fit.MA1$bic,0)
+
+# MA(2)
+fit.MA2     = Arima(Yn, order = c(0,0,2), seasonal = FALSE, include.mean = FALSE)
+plot.MA2    = autoplot_roots(fit.MA2)
+MA2c1       = as.numeric(round(fit.MA2$coef[1],3))
+MA2c2       = as.numeric(round(fit.MA2$coef[2],3))
+MA2AIC      = round(fit.MA2$aicc,0)
+MA2BIC      = round(fit.MA2$bic,0)
+
+# AR(1)
+fit.AR1     = Arima(Yn, order = c(1,0,0), seasonal = FALSE, include.mean = FALSE)
+plot.AR1    = autoplot_roots(fit.AR1)
+AR1c1       = as.numeric(round(fit.AR1$coef[1],3))
+AR1AIC      = round(fit.AR1$aicc,0)
+AR1BIC      = round(fit.AR1$bic,0)
+
+# AR(2)
+fit.AR2     = Arima(Yn, order = c(2,0,0), seasonal = FALSE, include.mean = FALSE)
+plot.AR2    = autoplot_roots(fit.AR2)
+AR2c1       = as.numeric(round(fit.AR2$coef[1],3))
+AR2c2       = as.numeric(round(fit.AR2$coef[2],3))
+AR2AIC      = round(fit.AR2$aicc,0)
+AR2BIC      = round(fit.AR2$bic,0)
+
+# ARMA(1,1)
+fit.ARMA11  = Arima(Yn, order = c(1,0,1), seasonal = FALSE, include.mean = FALSE)
+plot.ARMA11 = autoplot_roots(fit.ARMA11)
+ARMA11c1       = as.numeric(round(fit.ARMA11$coef[1],3))
+ARMA11c2       = as.numeric(round(fit.ARMA11$coef[2],3))
+ARMA11AIC      = round(fit.ARMA11$aicc,0)
+ARMA11BIC      = round(fit.ARMA11$bic,0)
+
+# ARMA(2,2)
+fit.ARMA22  = Arima(Yn, order = c(2,0,2), seasonal = FALSE, include.mean = FALSE)
+plot.ARMA22 = autoplot_roots(fit.ARMA22)
+ARMA22c1       = as.numeric(round(fit.ARMA22$coef[1],3))
+ARMA22c2       = as.numeric(round(fit.ARMA22$coef[2],3))
+ARMA22c3       = as.numeric(round(fit.ARMA22$coef[3],3))
+ARMA22c4       = as.numeric(round(fit.ARMA22$coef[4],3))
+ARMA22AIC      = round(fit.ARMA22$aicc,0)
+ARMA22BIC      = round(fit.ARMA22$bic,0)
+
+# ARMA(1,2)
+fit.ARMA12  = Arima(Yn, order = c(1,0,2), seasonal = FALSE, include.mean = FALSE)
+plot.ARMA12 = autoplot_roots(fit.ARMA12)
+ARMA12c1       = as.numeric(round(fit.ARMA12$coef[1],3))
+ARMA12c2       = as.numeric(round(fit.ARMA12$coef[2],3))
+ARMA12c3       = as.numeric(round(fit.ARMA12$coef[3],3))
+ARMA12AIC      = round(fit.ARMA12$aicc,0)
+ARMA12BIC      = round(fit.ARMA12$bic,0)
+
+# ARMA(2,1)
+fit.ARMA21  = Arima(Yn, order = c(2,0,1), seasonal = FALSE, include.mean = FALSE)
+plot.ARMA21 = autoplot_roots(fit.ARMA21)
+ARMA21c1       = as.numeric(round(fit.ARMA21$coef[1],3))
+ARMA21c2       = as.numeric(round(fit.ARMA21$coef[2],3))
+ARMA21c3       = as.numeric(round(fit.ARMA21$coef[3],3))
+ARMA21AIC      = round(fit.ARMA21$aicc,0)
+ARMA21BIC      = round(fit.ARMA21$bic,0)
+```
+    
+Plots of the polynomial roots for each model are shown below and are labeled as figures A through H.  Also shown below is a table of the relevant model coefficients and associated corrected AIC and BIC values for model comparison.  
+
+```{r, fig.width=10, fig.height=8}
+(plot.MA1|plot.MA2|plot.AR1) / (plot.AR2|plot.ARMA11|plot.ARMA22) /(plot.ARMA12|plot.ARMA21)  + plot_annotation(
+  title = 'Polynomial Root Plots for Each Model',
+  subtitle = 'Models E, F and G all have similar/repeated roots.  All roots are within the unit circle.',
+  tag_levels = "A", tag_prefix = 'Model ')  
+```
+  
+*Table 1: Model coefficients, corrected AIC & BIC scores*  
+
+|  Model |  ar(1) | ar(2)  |  ma(1) | ma(2)  | AICc  | BIC  |
+|--:|--:|--:|--:|--:|--:|---|
+| A: MA(1)  | NA  | NA  | `r MA1c1`  | NA  |  `r MA1AIC` |  `r MA1BIC`|
+| B: MA(2)  | NA  | NA  | `r MA2c1`  | `r MA2c2`  |  `r MA2AIC` |  `r MA2BIC`|
+| C: AR(1)  | `r AR1c1`   | NA  | NA  | NA  |  `r AR1AIC` |  `r AR1BIC`|
+| D: AR(2)  | `r AR2c1`   | `r AR2c2`  | NA  | NA  |  `r AR2AIC` |  `r AR2BIC`|
+| E: ARMA(1,1)  | `r ARMA11c1`   | NA  | `r ARMA11c2`  | NA  |  `r ARMA11AIC` |  `r ARMA11BIC`|
+| F: ARMA(2,2)  | `r ARMA22c1`   | `r ARMA22c2`  | `r ARMA22c3`  | `r ARMA22c4`  |  `r ARMA22AIC` |  `r ARMA22BIC`|
+| G: ARMA(2,1)  | `r ARMA21c1`   | `r ARMA21c2`  | `r ARMA21c3`  | NA  |  `r ARMA21AIC` |  `r ARMA21BIC`|
+| H: ARMA(1,2)  | `r ARMA12c1`   | NA  | `r ARMA12c2`  | `r ARMA12c3`  |  `r ARMA12AIC` |  `r ARMA12BIC`|
+  
+Models E through H are simply not feasible.  Most of these have duplicate/similar roots so information is being repeated.  Models A through D all have very similar AIC and BIC scores and each has unique roots within the unit circle.  These 4 models will be explored further by examining residuals.  
+
+**Check Model Residuals**
+
+```{r, fig.width=6, fig.height=4}
+plot.resA = checkresiduals(fit.MA1, points = FALSE)
+plot.resB = checkresiduals(fit.MA2, points = FALSE)
+plot.resC = checkresiduals(fit.AR1, points = FALSE)
+plot.resD = checkresiduals(fit.AR2, points = FALSE)
+```
+  
+From the residual plots and from the table above, it appears that the MA(2) model fits our data the best, as the only somewhat significant lag (of the first 5) is the 4th, and it's just barely significant.  This model will be used in forecasting.  
+
+# Question 3: Forecasting  
+**3) Give the 1-, 2- and 3-step-ahead point forecasts and the corresponding 95% prediction intervals.**  
+```{r}
+fore3.out = predict(fit.MA2, n.ahead=3)
+PIlow = PIhi = rep(0,3)
+q3 = quantile(qdist(distribution = "std", p=q_grid, mu=fits[[1]]$pars[1], sigma = fits[[1]]$pars[2], shape = fits[[1]]$pars[3]),.975)
+for (i in 1:3){
+  PIlow[i] = fore3.out$pred[i] - q3 * fore3.out$se[i]
+  PIhi[i] = fore3.out$pred[i] + q3 * fore3.out$se[i]
+}
+```
+  
+|  **Step Ahead** |  **Point Estimate - Log Return** | **95% Prediction Interval**  |  
+|--:|--:|---|
+| 1  | `r round(fore3.out$pred[1],5)`  | from `r round(PIlow[1],5)`  to  `r round(PIhi[1],5)`  | 
+| 2  | `r round(fore3.out$pred[2],5)`  | from `r round(PIlow[2],5)`  to  `r round(PIhi[2],5)`  | 
+| 3  | `r round(fore3.out$pred[3],5)`  | from `r round(PIlow[3],5)`  to  `r round(PIhi[3],5)`  | 
+  
+**3b) Use Calculate the k-step-ahead point forecasts and the corresponding 90% and 95% prediction intervals for k = 1, 2, . . . , 100 with forecast(). Assign an object for the return value, please do not display them. Please plot the forecast.**  
+```{r}
+pred3b = forecast(fit.MA2, h=100, level = c(90,95))
+autoplot(pred3b, xlim=c(2517,2617), ylim = c(-.05,.05), xlab = "step ahead")
+```
+

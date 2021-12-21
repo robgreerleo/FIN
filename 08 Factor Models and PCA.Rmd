@@ -1,0 +1,235 @@
+---
+title: "Factor Models & PCA"
+subtitle: Rob Leonard (robleonard@tamu.edu)
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+# Preliminary Setup    
+Load Data  
+```{r}
+load("HW08_RT.Rdata")
+source("FM_functions.R")
+# Get data from Fama/French website
+FF_data = read.table("F-F_Research_Data_Factors_weekly.txt", header=T)   # read in downloaded data
+ind.0   = which(rownames(FF_data) == 20060106)                           # remove earlier historical data
+FF_data = FF_data[-(1:(ind.0-1)),]                
+cat("dimension of FF_data:", dim(FF_data))
+attach(FF_data)                                                                      
+```
+  
+# Question 1: Fama-French 3 Factor Model  
+**1a) Plot a summary of the Rsq. and Betas.**  
+```{r}
+Yt = apply(Rt,2, function(x) x-RF)    # subtract rf from weekly returns to get excess returns
+dimnames(Yt)[[2]] = syb               # add symbol names
+n = dim(Yt)[1]                        # define n = # returns for each stock
+N = dim(Yt)[2]                        # define N = # of stocks
+p = 3                                 # define p = # of factors
+fit = lm(Yt~Mkt.RF+SMB+HML)           # fit the regression model on the factors
+sfit = summary(fit)
+# define Betas Vector
+betas = coef(fit)[-1,]
+# define R-squared vector
+R.Squared = c()
+for(i in 1:N) R.Squared[i] = sfit[[i]]$r.squared
+# plot summary
+coef.plot(R.Squared, betas)
+# Check Aggressiveness by Industry
+industry = c("Food", "Media", "Healthcare", "Tech")  # vector of industry names
+Ns = c(7,6,6,7)                              # count of securities in each industry
+by_industry = c()
+for(i in 1:4) by_industry = c(by_industry, rep(industry[i],Ns[i]))
+table(Aggressive = coef(fit)[2,] > 1, by_industry)
+# Summarize R2 by industry
+R.Squared = c()
+for(i in 1:N) R.Squared[i] = sfit[[i]]$r.squared
+table(Hi_R.Sq = R.Squared > 0.5, by_industry)
+```
+  
+Media has the two highest R-squared values (Disney at .5875 and Viacom at .60).  The rest of the stocks all have R-squared values below .5, meaninig that less than 50% of the asset return variance is explained by the 3 factor model for these  stocks.  
+  
+Healthcare and Media are generally aggressive industries, each with 5 out of 6 stocks having an estimated coefficient on the excess return factor that is greater than 1.  Food is not aggressive, with all 7 stocks below 1. Tech is approximately equally weighted with 4 stocks labeled aggressive and 3 not. In total, 14 of the 26 stocks are aggressive.  
+  
+**1b) Identify those individual assets that do not follow the FF-3-factor model and their sectors.**  
+```{r}
+alpha = sfit[[1]]$coef[1,]
+for(i in 2:N){
+  alpha= rbind(alpha, sfit[[i]]$coef[1,])
+}
+dimnames(alpha)[[1]] = syb                
+cat("alpha significant at 5%: \n", syb[(alpha[,4] < 0.05)])  # output the stocks that don't work for model
+alpha[(alpha[,4]< 0.05),]
+```
+  
+All of the individual stocks follow the FF-3-factor model using an alpha = 5%.  
+  
+**1c) Test if the FF-3-factor model holds for ALL the 26 assets. Use both the Wald and the LRT.**  
+```{r}
+# Wald Test for all alpha's are zero 
+ahat = alpha[,1]                          # intercepts from each LR model combined in one vector
+res = resid(fit)                          # residual from each LR model combined for all models
+Sig.e = 1/n*t(res)%*%res                   # Sigma_epsilon hat
+Ft = FF_data[,1:3]                         # the three factors
+F.bar = apply(Ft,2,mean); F.S2 = cov(Ft)   # sample mean and variance of Ft
+wald = (n-N-p)/N*1/(1+t(F.bar)%*%solve(F.S2)%*%F.bar)*(t(ahat)%*%solve(Sig.e)%*%ahat)   # Wald statistic
+cat("Wald Test: \n", c(statistic = wald, p.value = 1-pf(wald, N, n-N-p)))
+					
+# Likelihood Ratio Test for all alpha's are zero 
+res.0 = resid(lm(Yt~Mkt.RF+SMB+HML-1))     # residuals from the restricted model
+Sig.e0 = 1/n*t(res.0)%*%res.0              # Sigma_epsilon hat under H0
+lr = (n-N/2-p-1)*(log(det(Sig.e0))-log(det(Sig.e)))  # LRT statistic
+cat("\n \n LRT Test: \n", c(statistic = lr, p.value =1-pchisq(lr, N)))
+```
+  
+Our null hypothesis is that the 3 factor model is valid, meaning that the vector of intercepts is 0 ($H_0$: *a* = 0).     
+The p-values from both tests are equivalent and high.  We do not have sufficient evidence to reject the null hypothesis that the 3 factor model is valid.  
+  
+**1d) Test if FF-3-factor model holds for each industry by testing the assets from the same industry.**  
+```{r}
+cat(" Testing alpha's in Food industry are zero \n")                                   
+ind = 1:7 
+Ni = length(ind)
+wald = (n-Ni-p)/Ni*1/(1+t(F.bar)%*%solve(F.S2)%*%F.bar)*
+(t(ahat[ind])%*%solve(Sig.e[ind,ind])%*%ahat[ind])                      #Wald statistic
+lr = (n-Ni/2-p-1)*(log(det(Sig.e0[ind,ind]))-log(det(Sig.e[ind,ind])))  #LRT
+cat("Wald test:\n") 
+c(statistic = wald, p.value = 1-pf(wald, Ni, n-Ni-p))
+cat("LR test:\n")
+c(statistic = lr, p.vallue = 1-pchisq(lr, Ni))
+
+cat("\n Testing alpha's in Media industry are zero \n")                                   
+ind = 8:13 
+Ni = length(ind)
+wald = (n-Ni-p)/Ni*1/(1+t(F.bar)%*%solve(F.S2)%*%F.bar)*
+(t(ahat[ind])%*%solve(Sig.e[ind,ind])%*%ahat[ind])                      #Wald statistic
+lr = (n-Ni/2-p-1)*(log(det(Sig.e0[ind,ind]))-log(det(Sig.e[ind,ind])))  #LRT
+cat("Wald test:\n") 
+c(statistic = wald, p.value = 1-pf(wald, Ni, n-Ni-p))
+cat("LR test:\n")
+c(statistic = lr, p.vallue = 1-pchisq(lr, Ni))
+
+cat("\n Testing alpha's in Healthcare industry are zero \n")                                   
+ind = 14:19 
+Ni = length(ind)
+wald = (n-Ni-p)/Ni*1/(1+t(F.bar)%*%solve(F.S2)%*%F.bar)*
+(t(ahat[ind])%*%solve(Sig.e[ind,ind])%*%ahat[ind])                      #Wald statistic
+lr = (n-Ni/2-p-1)*(log(det(Sig.e0[ind,ind]))-log(det(Sig.e[ind,ind])))  #LRT
+cat("Wald test:\n") 
+c(statistic = wald, p.value = 1-pf(wald, Ni, n-Ni-p))
+cat("LR test:\n")
+c(statistic = lr, p.vallue = 1-pchisq(lr, Ni))
+
+cat("\n Testing alpha's in Tech industry are zero \n")                                   
+ind = 20:26 
+Ni = length(ind)
+wald = (n-Ni-p)/Ni*1/(1+t(F.bar)%*%solve(F.S2)%*%F.bar)*
+(t(ahat[ind])%*%solve(Sig.e[ind,ind])%*%ahat[ind])                      #Wald statistic
+lr = (n-Ni/2-p-1)*(log(det(Sig.e0[ind,ind]))-log(det(Sig.e[ind,ind])))  #LRT
+cat("Wald test:\n") 
+c(statistic = wald, p.value = 1-pf(wald, Ni, n-Ni-p))
+cat("LR test:\n")
+c(statistic = lr, p.vallue = 1-pchisq(lr, Ni))
+```
+  
+Both the Wald and Likelihood Ratio tests are not significant for any of the 4 industries.  We cannot reject the 4 null hypotheses that each industry's weekly returns follow the 3 factor Fama-French model.  
+  
+**1e) give the numbers of parameters of the sample covariance and the model based. The model based estimation relies on the assumption that the covariance is diagonal. Check the assumption.**  
+```{r}
+covparam = (N*(N+1)/2)
+modparam = (p+1)*(N+p/2)
+cat("The number of sample covariance parameters to estimate is:", covparam, "\n")
+cat("The number of model based parameters to estimate is:", modparam, "\n")
+```
+  
+Now check the assumption of a diagonal covariance using the heat map.  
+```{r}
+resid.summary(res)
+```
+  
+The plot shows that there is a block structure in the variance-covariance matrix.  There are moderately strong positive correlations in the diagonal blocks indicating that industry type should be a factor, especially for food and healthcare.  The correlation between two returns from the same industry is higher than those from differing industries.  
+There is also some weak positive correlation between Media and Tech companies.  
+  
+# Question 2: Factor Analysis  
+Setup  
+```{r}
+p = 3                             
+Zt = apply(Yt, 2, function(u) (u-mean(u))/sd(u))                  # using standardized excess returns
+fa = factanal(Zt, p, scores = "Bartlett", rotation = "none")      # apply Bartlett and no rotation
+B = t(fa$loading)                                                 # extract loadings 
+Ft.fa = fa$scores                                                 # proxy Ft - extract our estimated factor realizations
+R.Sq.fa = diag(t(B)%*%var(Ft.fa)%*%B)                             # R2 calc'd in a similar way to PCA
+Ehat =   Zt - Ft.fa %*% B                                         # calculate residuals
+```
+  
+**2a) Examine the loading estimate. Can you find interpretation about these coefficients?**  
+```{r}
+print(B)
+```
+  
+Factor 1 is positive for all stocks and ranges from 0.306 to 0.807.  This is likely a market component as it represents general movement.  
+Factor 2 is positive for all stocks except those in the healthcare industry.  This is likely an industry component.  
+Factor 3 is mainly negative for food and healthcare stocks but positive for media and tech.  Similar to factor 2, this is likely an industry component.  
+  
+**2b) Check the covariance structure of the errors with the resid.summary() function. Describe your findings.**  
+```{r}
+resid.summary(Ehat)
+```
+  
+Unlike part 1e, there isn't strong evidence of block correlation by industry here.  There is a some minor, negative block correlation in the food industry but it's very mild.  This covariance structure is pretty good as there is little correlation along the diagonals (with the exception of a few pairs of stocks) as well as between industries. The color scale for positive correlation is lower here than in 1e but the negative correlation is higher.   
+  
+# Question 3: Principal Component Analysis  
+Setup  
+```{r}
+p = 3
+pca = prcomp(Zt)
+```
+  
+**3a) Plot the scree plot.  How many principal components would you choose?**  
+```{r}
+plot(pca)
+```
+  
+It appears that 3 principal components would be a good choice.  
+  
+**3b) Approximate the factor model with p = 3.  Compute the estimated factors and R Squared.**  
+```{r}
+B.3 = t(pca$rotation[,1:p])                          # t(Op)
+Ft.pc = pca$x[,1:p]                                  # proxy Ft  -> these are the approximate factors
+R.Sq.pc = diag(t(B.3)%*%diag(pca$sd[1:p]^2)%*%B.3)
+```
+  
+  
+  
+**3c) Examine the weights of principal components - can you find interpretations form them?**  
+```{r}
+B.3                  # calculated in part 3b as:     B.3 = t(pca$rotation[,1:p])  
+```
+  
+The weights of Principal Component 1 are negative for all stocks, indicating that this is likely a market related component (negative of the market factor).  
+The weights of PC2 are negative for all of the food stocks and a few of the tech stocks.  This is likely an industry component.  
+The weights of PC3 are all negative for food and healthcare and all positive for media and tech, again indicating that this is likely an industry component.  
+  
+**3d) Check the covariance structure of the errors.  Describe your findings.**  
+```{r}
+Ehat3 =   Zt - Ft.pc %*% B.3                                         # calculate residuals
+resid.summary(Ehat3)
+```
+  
+Similar to 2b, there isn't strong evidence of block correlation by industry here.  There is a some minor, negative block correlation in the food industry and some positive correlation in the tech industry but both are very mild.    This covariance structure is again pretty good as there is little correlation along the diagonals (with the exception of a few pairs of stocks) as well as between industries.  Note that the color scale for positive correlation is also .1 lower here than in part 2b.  
+  
+# Question 4: Comparison of Methods  
+**4a) Plot the R Squared values of the 3 models.**  
+```{r}
+RSq.all = t(cbind(R.Squared, R.Sq.fa, R.Sq.pc))
+RSq.plot(RSq.all)
+```
+  
+**4b) Compare and comment the three approaches in pricing modeling from all the analysis you have done.**  
+For food and Media companies, the PCA price modeling approach has the highest R-squared values, indicating that this model explains more variation in excess weekly returns than the other two models. 
+  
+For healthcare and tech, the factor analysis method has the higher R-squared values.  
+  
+The 3 factor Fama-French model generally performs the worst, except for Disney and Viacom. Both the PCA and FA methods do best for 12 stocks each.  Either of these two methods seems more appropriate than the 3 factor Fama French model.  They also have better correlation plots with very few strongly correlated pairs or industry correlations (positive or negative).  This makes sense as the Fama-French model has rigid factors, whereas PCA and FA can blend factor compositions as they are linear combinations.     
+

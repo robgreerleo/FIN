@@ -1,0 +1,210 @@
+---
+title: "Univariate/Multivariate Models"
+subtitle: Rob Leonard (robleonard@tamu.edu)
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+# Question 1: R Lab 5.19 Problem 2
+**Initial setup.** 
+```{r}
+library("MASS")
+library("Ecdat")
+data(CPSch3)
+male.earnings = CPSch3[CPSch3[ ,3] == "male", 2]
+sqrt.male.earnings = sqrt(male.earnings)
+log.male.earnings = log(male.earnings)
+par(mfrow = c(1, 1))
+boxcox(male.earnings ~ 1)
+#boxcox(male.earnings ~ 1, lambda = seq(0.3, 0.45, 1 / 100))
+bc = boxcox(male.earnings ~ 1, lambda = seq(0.3, 0.45, by = 1 / 100), interp = FALSE)
+ind = (bc$y == max(bc$y))
+ind2 = (bc$y > max(bc$y) - qchisq(0.95, df = 1) / 2)
+bc$x[ind]
+bc$x[ind2]  
+```
+  
+**2a: What are ind and ind2 and what purposes do they serve?**  
+Ind is a logical vector, where the single "TRUE" indicates which value of the $\lambda$ search sequence is the maximum likelihood estimator for the data transformation power.  Ind2 is a similar logic vector where TRUE indicates the values of the sequence that are in a 95% confindence interval for the MLE.  
+  
+**2b: What is the effect of interp on the output from boxcox?**  
+Interp is a logical argument, and when set to TRUE, it would turn on spline interpolation.  This would theoretically make a less jagged/smoother plot, but we already have a fairly small interval.  It would also increase the output vector of the 95% confidence interval values as we would no longer be using a .01 fixed interval, but values associated with the smoothing technique.  
+
+**2c: What is the MLE of lambda?**  
+The MLE of $\lambda$ is `r bc$x[ind]`.  
+
+**2d: What is a 95% CI for lambda?**  
+A 95% CI for lambda is (`r bc$x[ind2] [which.min(bc$x[ind2])]` , `r bc$x[ind2] [which.max(bc$x[ind2])]`).  
+
+**2e: What is a 99% CI for lambda?**  
+```{r}
+ind3 = (bc$y > max(bc$y) - qchisq(0.99, df = 1) / 2)
+bc$x[ind3]
+```
+  
+A 99% CI for lambda is (`r bc$x[ind3] [which.min(bc$x[ind3])]` , `r bc$x[ind3] [which.max(bc$x[ind3])]`). 
+
+# Question 2: S&P 500
+**Part a) Fit standardized t, skewed t, GED, skewed GED.**
+```{r}
+library(rugarch)
+library(quantmod)
+getSymbols("^GSPC", from = "1991-01-01", to = "2021-02-01")
+rt = weeklyReturn(Ad(GSPC), type = "log")
+dists = c("std", "sstd", "ged", "sged")
+fits = vector("list", 4)
+for(i in 1:4) fits[[i]] = fitdist(dists[i], rt)
+```
+  
+**Part b) Plot density curve and overlay with kernel density estimate.**  
+```{r, fig.width=8, fig.height=8}
+par(mfrow = c(2, 2))
+den = density(rt)  # store kernel density estimates
+labels = c("Standardized t", "Skewed t", "GED", "Skewed GED")
+for (i in 1:4) {
+  est = fits[[i]]$pars
+  yvals = ddist(dists[i], den$x, mu = est["mu"], sigma = est["sigma"], skew = est["skew"], shape = est["shape"])
+  plot(den$x, yvals, type="l", lwd=2, col=i+1, xlab="Log Weekly Returns", ylab="Density", main=labels[i], xlim = c(-.2,.15), ylim = c(0,30))
+  lines(den$x, den$y, lwd=2, lty=2, col="black") # Kernel Density 
+  legend("topleft", c(labels[i],"KDE"),  lwd=c(2,2), lty=c(1,2), col = c(i+1, "gray"))
+}  
+```
+  
+From the plots it appears that the standardized t and the skewed t distributions match up fairly well to the kernel density estimator.  Both the GED and skewed GED have peaks that are too high.  
+  
+```{r, fig.width=8, fig.height=8, fig.asp=.6}
+# zoom in on standardized and skew t peaks
+par(mfrow = c(1,2))
+for (i in 1:2) {
+  est = fits[[i]]$pars
+  yvals = ddist(dists[i], den$x, mu = est["mu"], sigma = est["sigma"], skew = est["skew"], shape = est["shape"])
+  plot(den$x, yvals, type="l", lwd=2, col=i+1, xlab="Log Weekly Returns", ylab="Density", main=labels[i], xlim = c(-.05,.05), ylim = c(0,25))
+  lines(den$x, den$y, lwd=2, lty=2, col="black") # Kernel Density 
+  legend("topleft", c(labels[i],"KDE"),  lwd=c(2,2), lty=c(1,2), col = c(i+1, "gray"), cex=.7)
+}  
+```
+  
+From the zoomed in view, it looks like the skewed t distribution more closely matches the KDE as there is less deviation on the left side of the peak and both peaks are more closely aligned with each other.  But either distribution would be a good match.  
+  
+**Part c) Compute the AIC and BIC criteria for all 4 models.**  
+```{r}
+AIC_dist  = BIC_dist = rep(0,4)  # set up results vectors
+BIC_dist  = rep(0,4)
+for (i in 1:4){
+  logLike      = min(fits[[i]]$values)
+  numbParam    = length(fits[[i]]$pars) # count # parameters used for each
+  AIC_dist[i]  = 2*logLike + 2*numbParam  # from p. 54 HO 3 fitdist() gives -loglikelihood,  use last value
+  BIC_dist[i]  = 2*logLike + numbParam*log(length(rt))  # formulas on p. 55
+}
+```
+  
+|         | `r labels[1]`            | `r labels[2]`           | `r labels[3]`           | `r labels[4]`           |
+|--------:|:------------------------:|:-----------------------:|:-----------------------:|:-----------------------:|
+| **AIC** | `r round(AIC_dist[1],1)` |`r round(AIC_dist[2],1)` |`r round(AIC_dist[3],1)` |`r round(AIC_dist[4],1)` |
+| **BIC** | `r round(BIC_dist[1],1)` |`r round(BIC_dist[2],1)` |`r round(BIC_dist[3],1)` |`r round(BIC_dist[4],1)` |  
+  
+Using AIC as a criteria, the model selects the `r labels[which.min(AIC_dist)]` distribution.  
+Using BIC as a criteria, the model selects the `r labels[which.min(BIC_dist)]` distribution.  
+I would also choose the Skewed t distribution since both AIC and BIC concur and the plots from part b tilt slightly towards using a Skewed t over a Standardized t.  
+
+**Part d) For the 2 skewed distributions, construct 95% CI's of the skew parameter.**  
+```{r}
+#names(fits[[2]]$pars)
+sigmaDistb = sqrt(diag(solve(fits[[2]]$hessian)))  # skew is parameter 3 for both distributions
+lowerDistb = fits[[2]]$pars[3] - 1.96*sigmaDistb[3]
+upperDistb = fits[[2]]$pars[3] + 1.96*sigmaDistb[3]
+sigmaDistd = sqrt(diag(solve(fits[[4]]$hessian)))  # skew is parameter 3
+lowerDistd = fits[[4]]$pars[3] - 1.96*sigmaDistd[3]
+upperDistd = fits[[4]]$pars[3] + 1.96*sigmaDistd[3]
+```
+The 95% CI for skewness for the Skewed t distribution is (`r round(lowerDistb,3)`,`r round(upperDistb,3)`).
+The 95% CI for skewness for the Skewed t distribution is (`r round(lowerDistd,3)`,`r round(upperDistd,3)`).  
+  
+Since neither CI contains 1, we have significant evidence to reject the null hypothesis of a symmetric distribution and conclude that both distributions are skewed.  Since both skew intervals are below 1 and we are using F-S distributions, skew < 1 indicates left skew (HO 3 p. 43, symmetric when skew parameter = 1).    
+    
+**Part e).**  
+```{r}
+library(fGarch)  # follow format on HO 3, page 59
+logLik0_sstd = function(theta){  # 0 is the reduced model, fix skew to 1 which is symmetric
+  -sum(dsstd(rt, mean = theta[1], sd = theta[2], nu = theta[3], xi = 1, log=TRUE))
+}
+startValues = c(fits[[2]]$pars[1], fits[[2]]$pars[2], fits[[2]]$pars[4])  # use estimates from before
+fit0_sstd = nlminb(startValues, logLik0_sstd, lower=c(0, 0.001, 0))
+(LRT = -2*(fits[[2]]$values[3]-fit0_sstd$objective))
+(pval = 1-pchisq(LRT,1))
+```
+  
+$H_0$: Distribution is symmetric (skew = 1).  
+$H_a$: Distribution is not symmetric (skew $\ne$ 1).  
+  
+The Likelihood Ratio Test statistic is `r round(LRT,3)` and the corresponding p-value is `r round(pval,4)`.  Since the test statistic is high and the p-value if very low (less than an $\alpha$=.05), there is significant evidence to reject the null hypothesis and conclude that the distribution is not symmetric.  This answer corresponds to the answers in parts b and c which indicated that the Skewed t distribution was a better fit.  
+  
+
+# Question 3: 
+**Set up.**  
+```{r, fig.width=6, fig.height=6}
+par(mfrow=c(2,2))
+N = 2500
+nu = 3
+# a
+set.seed(5640)
+cov=matrix(c(1, 0.8, 0.8, 1), nrow = 2)
+x= mvrnorm(N, mu = c(0, 0), Sigma = cov)
+w = sqrt(nu / rchisq(N, df = nu))
+x = x * cbind(w, w)
+plot(x, main = "(a)")
+# b
+set.seed(5640)
+cov=matrix(c(1, 0.8, 0.8, 1),nrow = 2)
+x= mvrnorm(N, mu = c(0, 0), Sigma = cov)
+w1 = sqrt(nu / rchisq(N, df = nu))
+w2 = sqrt(nu / rchisq(N, df = nu))
+x = x * cbind(w1, w2)
+plot(x, main = "(b)")
+# c
+set.seed(5640)
+cov=matrix(c(1, 0, 0, 1), nrow = 2)
+x= mvrnorm(N, mu = c(0, 0), Sigma = cov)
+w1 = sqrt(nu / rchisq(N, df = nu))
+w2 = sqrt(nu / rchisq(N, df = nu))
+x = x * cbind(w1, w2)
+plot(x, main = "(c)")
+# d
+set.seed(5640)
+cov=matrix(c(1, 0, 0, 1), nrow = 2)
+x= mvrnorm(N, mu = c(0, 0), Sigma = cov)
+w = sqrt(nu / rchisq(N, df = nu))
+x = x * cbind(w, w)
+plot(x, main = "(d)")
+```
+  
+**Problem 3: Which sample has independent variates? Explain your answer.**  
+Sample C has the independent variates as it is generated by two independent normal random variable draws combines with two separate, independent chi-square draws.  The normal random variables have a correlation of 0 and for the multivariate normal case (only) this implies independence.  There isn't any apparent tail dependence here as the outliers tend to cling closely to the axes.
+  
+**Problem 4: Which sample has variates that are correlated but do not have tail dependence? Explain your answer.**   
+Sample B has variates that are correlated but without tail dependence.  There is no tail dependence since the sample is generated with two independent chi-square draws (rather than using the same single draw).  There is correlation since the variance-covariance matrix shows positive covariance of 0.8. The scatterplot shows that outliers again cling to the axes (so no tail-dependence). 
+
+**Problem 5 Which sample has variates that are uncorrelated but with tail dependence? Explain your answer.**  
+Sample D has uncorrelated variates but has tail dependence.  The scatterplot shows that the outliers do not cling to the axes like in samples B and C.  The sample is generated using the same chi-squared draw, which generates the tail dependence.  The sample is uncorrelated since the multivariate normal part of the generation has a covariance value of 0 in the variance-covariance matrix.  
+
+**Problem 6: Part a - What is the distribution of R?**  
+```{r, fig.align="center", fig.cap=c("Caption")}
+knitr::include_graphics("Q3a.pdf")
+```
+  
+**Problem 6: Part b - Generate a random sample from R.  Compute the 0.01 upper quantile of this sample and the sample average of all returns that exceed this quantile.**  
+```{r}
+set.seed(200128)
+meanQ6    = 0.0015
+varQ6     = 0.0775
+sampleQ6  = 10000
+vQ6       = 5
+stdDevCl  = sqrt(((5-2)/5)*varQ6)  # convert to studentized/classical which is used in rt()
+Rvalues   = meanQ6 + rt(sampleQ6,vQ6)*stdDevCl
+UpperQ    = round(quantile(Rvalues,.99),3)
+AvgUpper  = round(mean(Rvalues[Rvalues > UpperQ]),3)
+```
+  
+The upper quantile of the sample is `r UpperQ`.  The average of all returns in the sample that exceed this quantile is `r AvgUpper`.  
+

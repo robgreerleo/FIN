@@ -1,0 +1,228 @@
+---
+title: "Multivariate t & Copulas"
+subtitle: Rob Leonard (robleonard@tamu.edu)
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+# Question 1: R Lab 7.13.1 Problem 1
+**Initial setup.** 
+```{r}
+library(quantmod); options("getSymbols.warning4.0"=FALSE)
+syb          = c("NKE", "CVS", "PG", "K")
+d            = length(syb)
+rt           = c()
+for(i in 1:d) {
+  getSymbols(syb[i], from = "2009-01-01", to = "2021-02-01")
+  rt = cbind(rt, weeklyReturn(Ad(get(syb[i])), type = "log")[-1])
+}
+colnames(rt) = syb
+rt           = as.matrix(rt) ## remove xts class  
+
+# setup skewness and kurtosis functions from HW 02
+Sk.fun <- function(x) { ## function to compute skewness from HO 3
+  mean((x-mean(x))^3/sd(x)^3)
+}
+Kur.fun <- function(x){ ## function to compute kurtosis
+  mean((x-mean(x))^4/sd(x)^4)
+}
+```
+    
+**a) Plot scatterplot and estimate variance.**  
+```{r}
+pairs(rt)
+w       = cbind(.5, .3, .2, 0)
+var1a   = w %*% cov(rt) %*% t(w)  
+```
+  
+The estimated variance is `r round(var1a,6)`.  
+  
+**b) Justify that a multivariate t is a suitable candidate model for rt.**  
+```{r}
+library(MASS); options(warn = -1)
+stat           = matrix(ncol = dim(rt)[2], nrow=4)
+rownames(stat) = c("skew","kurt","nu","se.nu")
+colnames(stat) = colnames(rt)
+for (i in 1:dim(rt)[2]){
+  stat[1,i] = Sk.fun(rt[,i])
+  stat[2,i] = Kur.fun(rt[,i])
+  fit       = fitdistr(rt[,i], "t")
+  stat[3,i] = fit$estimate[3]
+  stat[4,i] = fit$sd[3]
+}  
+```
+|         | `r colnames(stat)[1]`  | `r colnames(stat)[2]` | `r colnames(stat)[3]` | `r colnames(stat)[4]` |
+|--------:|:------------------------:|:-----------------------:|:-----------------------:|:---------------:|
+| **Skewness** | `r  round( stat[1,1],4)` |`r  round( stat[1,2],4)` |`r  round( stat[1,3],4)` |`r round( stat[1,4],4)` |
+| **Kurtosis** | `r  round( stat[2,1],4)` |`r  round( stat[2,2],4)` |`r  round( stat[2,3],4)` |`r round( stat[2,4],4)` | 
+| **nu** | `r  round( stat[3,1],4)` |`r  round( stat[3,2],4)` |`r  round( stat[3,3],4)` |`r round( stat[3,4],4)` | 
+| **se.nu** | `r  round( stat[4,1],4)` |`r  round( stat[4,2],4)` |`r  round( stat[4,3],4)` |`r round( stat[4,4],4)` |   
+  
+**c) Find the MLE of ν and a 90% profile likelihood confidence interval for ν.  Also plot profile log likelihood.**  
+```{r}
+library(mnormt)
+df         = seq(3.5,5.5, 0.01)
+loglik_p   = c()
+for (i in 1:length(df)) {
+  fit = cov.trob(rt, nu = df[i])  
+  loglik_p[i] = sum(dmt(rt, mean = fit$center, S = fit$cov, df = df[i], log = T))
+}
+nu       = df[which.max(loglik_p)]
+
+# calc CI boundaries
+confintLL  = 2*max(loglik_p) - qchisq(.90,1)
+lowerind   = which.min(loglik_p[0:100]<= confintLL/2 ) 
+upperind   = which.max(loglik_p[101:201]<= confintLL/2 )+99
+# plot
+par(mfrow = c(1,1))
+plot(df,2*loglik_p-11400,type="l",cex.axis=1,cex.lab=1, ylab="2*loglikelihood - 11,400",lwd=2)
+abline(h = 2*max(loglik_p) - qchisq(.90,1)-11400)
+abline(h = 2*max(loglik_p)-11400 )
+abline(v=df[lowerind])
+abline(v=df[upperind])
+```
+  
+The MLE degrees of freedom is `r nu`.  The 90% confidence interval is (`r df[lowerind]`,`r df[upperind]`).  
+  
+**d) Calculate the AIC and BIC for multivariate t.**  
+```{r}
+d = dim(rt)[2]; n = dim(rt)[1]
+p = d*(d+1)/2 + d + 1
+cat(paste(c("d","n","p"), c(d,n,p), sep=": "), sep = ", ")
+aic_rt = -2*max(loglik_p) + 2*p
+bic_rt = -2*max(loglik_p) + log(n)*p  
+```
+  
+AIC is `r aic_rt`.  
+BIC is `r bic_rt`.  
+  
+**e) Fit the skewed multivariate t distribution of Azzalini & Capitanio.**  
+```{r}
+library(sn)
+fit_st = mst.mple(y = rt)
+fit_st$dp  # estimated nu is greater than 4
+dp2cp(fit_st$dp, "st")
+```
+  
+**f) Compute the AIC and BIC of the skewed multivariate-t fit.**  
+```{r}
+p.st = d*(d+1)/2 + d + 1 + d
+cat("Number of parameters", paste(p.st))
+aic_st = -2*fit_st$logL + 2*p.st
+bic_st = -2*fit_st$logL + log(n)*p.st
+```
+  
+The AIC for the skewed multivariate t distribution is `r aic_st`.    
+The BIC for the skewed multivariate t distribution i `r bic_st`.  
+AIC chooses the skewed multivariate t distribution.  BIC chooses the unskewed multivariate t distribution.  BIC penalizes extra parameters more than AIC, and we have added 4 skewness parameters. As the AIC values are very similar, I would more rely on the BIC calculation and choose the unskewed multivariate t distribution as the model.  
+  
+# Question 2 
+**a) Is a multivariate-t model appropriate for xt?**  
+```{r}
+load("HW04.RData")  
+```
+No, a multivariate t model wouldn't work for all 4 stocks as we would need the estimated degrees of freedom to be comparable to every stock.  Here, 3 stocks have degrees of freedom close to 4, but AXP has a value of only 2.64.  A multivariate t could work for the other 3 stocks however.  
+  
+**b) Fit a multivariate t model with the MLE.**  
+```{r}
+x = xt[, c(1,3,4)] # create data set with ACM, CVX and JNJ
+dfx         = seq(3, 5, 0.01)
+loglik_px   = c()
+for (i in 1:length(dfx)) {
+  fitx = cov.trob(x, nu = dfx[i])  
+  loglik_px[i] = sum(dmt(x, mean = fitx$center, S = fitx$cov, df = dfx[i], log = T))
+}
+nux       = dfx[which.max(loglik_px)]  
+fit2b = cov.trob(x, nu =nux)
+varcov2b = fit2b$cov*nux/(nux-2) 
+```
+  
+The MLE degrees of freedom is `r nux`.  
+  
+**c) State the estimated marginal distributions of all series in x.**  
+The marginal distributions are univariate t distributions with the following parameters (using standard t from HO3 p.40):  
+  
+|   | mean  | variance  | df  |   
+|---|---|---|---|
+| ACM  | `r  fit2b$center[1]`  | `r varcov2b[1,1]`  | `r  nux`  |
+| CVX  | `r  fit2b$center[2]`  | `r varcov2b[2,2]`  | `r  nux`  |
+| JNJ  | `r  fit2b$center[3]`  | `r varcov2b[3,3]`  | `r  nux`  |
+  
+**d) Calculate a likelihood ratio test.**  
+```{r}
+LRT = 2*(loglik_px[138]-loglik_px[101])  # from HO 3 p. 58, 138 corresponds to nu=4.37, 101 to nu=4.0
+cat("LRT", LRT, " p-value: ", 1-pchisq(LRT,1))
+```
+Assuming we us an $\alpha$=.05 level test, the p-value of 0.09 is high, so there is not enough evidence to reject the null hypothesis ($H_0: \nu=4$).  The likelihood ratio test statistic is 2.86.  
+  
+# Question 7.14  
+  
+  
+# Question 8.9.1
+**Problem 1a) Give the copula family, the correlation matrix, and any other parameters that specify the copula.**  
+```{r}
+library(copula)
+cop_t_dim3 = tCopula(dim = 3, param = c(-0.6,0.75,0), dispstr = "un", df = 1)
+set.seed(5640)
+rand_t_cop = rCopula(n = 500, copula = cop_t_dim3)
+pairs(rand_t_cop)
+cor(rand_t_cop)
+corrMatrix = rbind(c(1,-0.6,0.75), c(-0.6,1,0),c(0.75,0,1))
+```
+    
+The copula family is a t-copula with 1 degree of freedom and 3 dimensions.  
+The type of positive symmetric positive definite matrix is unstructured ("un").  
+The correlation matrix is:
+`r corrMatrix`  
+  
+**1b) What is the sample size?**  
+The samle size is 500.  
+  
+**Problem 2a) Components 2 and 3 are uncorrelated. Do they appear independent? Why or why not?**  
+They do not appear independent as an independence would mean the scatterplot has no pattern and just fills out a sqaure.  There is an X like pattern in the scatterplot, so they are not independent.  
+
+**2b) Do you see signs of tail dependence? If so, where?**  
+Yes, there are signs of tail dependence as there are many points clustered in the corners of the plots, rather than being randomly and more uniformly distributed across the entire plot.
+  
+**2c) What are the effects of dependence upon the plots?**  
+For series 1 and 2, they are negatively correlated, so the tail dependence shows most in the top left and lower right corners.  Extreme positive values in one of the series is associated with extreme negative values in the other.  
+  
+Series 1 and 3 are negatively correlated, so the tail dependence shows most in the lower left and top right corners.  Extreme positive values in one series are associated with extreme positive values in the other (and the same for negative values showing as negative in the other).  
+  
+Series 2 and 3 are uncorrelated, so the tail dependence shows up in all 4 corners.  
+  
+**2d) The nonzero correlations in the copula do not have the same values as the corresponding sample correlations.  Check the Pearson confidene interval.  Explain.**  
+```{r}
+cor.test(rand_t_cop[,1],rand_t_cop[,3])
+```
+  
+The Pearson correlation CI does not include 0.75 in the confidence interval.  Our sample correlations are lower than those prescribed in the copula code.  The reason for this is that the sample correlation is on uniform random variables inside the copula whereas the 0.75 parameter is for the t-distributed random variables not in the copula.  
+  
+**Problem 3: setup.**
+```{r}
+cop_normal_dim3 = normalCopula(dim = 3, param = c(-0.6,0.75,0), dispstr = "un")
+mvdc_normal = mvdc(copula = cop_normal_dim3, margins = rep("exp",3), paramMargins = list(list(rate=2), list(rate=3), list(rate=4)))
+set.seed(5640)
+rand_mvdc = rMvdc(n = 1000, mvdc = mvdc_normal)
+pairs(rand_mvdc)
+par(mfrow = c(2,2))
+for(i in 1:3) plot(density(rand_mvdc[,i]))
+```
+  
+**3a) What are the marginal distributions of the three components in rand_mvdc? What are their expected values?** 
+The marginal distributions are all exponential with rate = 2,3,4, respectively.  The expected values are 1/rate, so 1/2, 1/3 and 1/4.  
+  
+**3b) Are the second and third components independent? Why or why not?**  
+Yes, since we are using a gaussian copula and the correlation is set to 0.  For gaussian (only) this implies independence.  
+  
+# Question 8.10
+**1) Kendall’s tau rank correlation between X and Y is 0.55. Both X and Y are positive. What is Kendall’s tau between X and 1/Y ? What is Kendall’s tau between 1/X and 1/Y ?**  
+For the 1/Y transform, this in effect reverses all the ranks and switches the sign.  Since the sign of X did not switch, we would end up with a value of -0.55.  For both the 1/X and 1/Y transformations, both ranks are now reveresed so both signs are swtiched.  But we multiply the signs together and get a net + so the value remains a +0.55.  
+  
+**2) Suppose that X is Uniform(0,1) and Y = X^2. Then the Spearman rank correlation and the Kendall’s tau between X and Y will both equal 1, but the Pearson correlation between X and Y will be less than 1. Explain why.**  
+Spearman's rank correlation and Kendall's tau only depend on the ranks of the X's and Y's and not their magnitudue.  Setting Y = $X^2$ changes the magnitude but not the ranks.  Pearson's correlation depends on the magnitudes of the X's and Y's.  The Y values are always less than the X values except when they both are 1, so Pearson's correlation will be less than 1.  
+
+
+
+

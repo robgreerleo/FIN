@@ -1,0 +1,195 @@
+---
+title: "Asset Returns, Random Walk & Efficient Market Hyp."
+subtitle: Rob Leonard (robleonard@tamu.edu)
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+# 2.4.1 Data Analysis
+**Data setup.** 
+```{r, fig.width=8}
+dat = read.csv("Stock_bond.csv", header = TRUE)
+#names(dat)   leave out for HW printing
+attach(dat)
+par(mfrow   = c(1, 2))
+plot(GM_AC, type='l', main="Adj. Closing Price", ylab = "GM")
+plot(F_AC, type='l', main="Adj. Closing Price", ylab = "Ford")
+n           = dim(dat)[1]
+GMReturn    = GM_AC[-1] / GM_AC[-n] - 1
+FReturn     = F_AC[-1] / F_AC[-n] - 1
+```
+```{r}
+par(mfrow   = c(1, 1))
+plot(GMReturn,FReturn, main ="Returns: Ford vs GM", ylab = "Ford Returns", xlab = "GM Returns")
+```
+
+
+**Problem 1: Do the GM and Ford returns seem positively correlated?**  
+  Yes, the returns do appear to be positively correlated.  A linear trend line, if plotted, would be upward sloping.  When GM has a positive return, Ford appears also to have had a positive return (and when GM had a negative return, Ford generally also appears to have had a negative return).      
+    
+  Yes, there are some return outliers in the plot, especially for returns greater than 10% in absolute value.  For example, GM has a return of over -20% while Ford's return was similarly about -18%.  It appears that GM's outlying returns do seem to occur with Ford's outlying returns and could be due to overall market returns that day or industry specific events that impacted both Ford and GM.   
+  
+**Problem 2: Compute the log returns for GM and plot the returns versus the log returns.**   
+```{r}
+lnGMReturn                 = log(1+GMReturn)
+plot(GMReturn,lnGMReturn, main = "Comparison of Return Type for GM", ylab="log Returns", xlab = "Arithmetic Returns")
+lines(GMReturn,GMReturn, col="gray")
+corGM                      = round(cor(GMReturn,lnGMReturn),6)  
+detach(dat)
+```
+  The correlation between the GM returns and the log returns is **`r corGM`**, which is very close to 1.0, meaning they are very **highly positively correlated** (with 1.0 being the maximum possible positive correlation).  This makes sense as log returns are simply a transformation of returns, albeit a non linear transformation.  Correlation measures linear correlation and the log transformation, which is non linear, results in a slight reduction from perfect correlation.   
+  
+**Problem 3: Repeat for Microsoft and Merck.**  
+```{r}
+library(quantmod)
+getSymbols(c("MSFT","MRK"), from = "2011-01-01", to = "2021-01-01")
+plot(cbind(Ad(MSFT),Ad(MRK)), legend.loc = "topleft", main = "Adjusted Closing Prices")
+MSFTreturn = dailyReturn(Ad(MSFT), type = "arithmetic", leading = TRUE)
+logMSFTreturn = dailyReturn(Ad(MSFT), type = "log", leading = TRUE)
+MRKreturn = dailyReturn(Ad(MRK), type = "arithmetic", leading = TRUE)
+logMRKreturn = dailyReturn(Ad(MRK), type = "log", leading = TRUE)
+plot(as.numeric(MSFTreturn),as.numeric(MRKreturn), main="Comparison of Returns", ylab="Merck", xlab="Microsoft")    
+```
+  
+  Microsoft and Merck's returns do seem positively correlated as a trend line through the scatter plot would be have positive slope.  There are some outlying returns for both stocks, but the outliers don't always occur together.  For example, Merck's 10% return corresponds to a 0% return for Microsoft and Microsoft's outlier's are larger in magnitude than the corresponding Merck outliers.    
+    
+      
+```{r, fig.width=8}
+par(mfrow = c(1,2))
+plot(as.numeric(MSFTreturn),as.numeric(logMSFTreturn), main="Return Type: MSFT", xlab = "Arithmetic", ylab = "Log")
+lines(as.numeric(MSFTreturn),as.numeric(MSFTreturn),col="gray")
+plot(as.numeric(MRKreturn),as.numeric(logMRKreturn), main="Return Type: MRK", xlab = "Arithmetic", ylab = "Log")
+lines(as.numeric(MRKreturn),as.numeric(MRKreturn),col="gray")
+corMSFT                      = round(cor(as.numeric(MSFTreturn),as.numeric(logMSFTreturn)),4) 
+corMRK                       = round(cor(as.numeric(MRKreturn),as.numeric(logMRKreturn)),4) 
+```
+    
+  The correlation between the MSFT returns and the log returns is `r corMSFT`, and for MRK the correlation coefficient is `r corMRK`.  These are again very close to 1.0, meaning they are both very highly positively correlated. 
+  
+# Problem 2.4.2-4  
+**What is the probability that the value of the stock will be below $950,000 at the close of at least one of the next 45 trading days?**   
+```{r}
+niter = 1e5 # number of iterations
+below = rep(0, niter) # set up storage
+set.seed(2009)
+for (i in 1:niter)
+{
+r = rnorm(45, mean = 0.05/253, sd = 0.23/sqrt(253)) # generate random numbers
+logPrice = log(1e6) + cumsum(r)
+minlogP = min(logPrice) # minimum price over next 45 days
+below[i] = as.numeric(minlogP < log(950000))
+}
+simResult = mean(below)
+```
+  The probability that the value of the stock will be below $950,000 at the close of at least one of the next 45 trading dats is **`r simResult`, or approximately 51%.**  
+  
+    
+# 2.4.3 Simulating a Geometric Random Walk  
+```{r, fig.height=8}
+set.seed(2012)
+n = 253
+par(mfrow=c(3,3))
+for (i in (1:9))
+{
+logr = rnorm(n, 0.05 / 253, 0.2 / sqrt(253))
+price = c(120, 120 * exp(cumsum(logr)))
+plot(price, type = "l")
+}  
+```
+  
+**Problem 9:  In this simulation, what are the mean and standard deviation of the log-returns for 1 year?**  
+```{r}
+meanSim243 = round(mean(logr),6)
+sdSim243 = round(sd(logr),6)
+```
+  The mean of the daily log-returns for this simulation is **`r meanSim243`** and the standard deviation is **`r sdSim243`.**  
+    
+**Problem 10: Discuss how the price series appear to have momentum.  Is the appearance of momentum real or an illusion?**  
+   
+The simulated price series appear to have momentum as there are many short run price movements in the same direction (both positive and negative). Some positive momentum would be real due to the nonzero, positive mean used in the simulation.    
+  
+**Problem 11: Explain what the code does.**  
+    
+This line of code creates a price vector of 254 values, starting with the first day opening price of 120 and then follows with simulated closing day prices for all 253 trading days by utilizing the cumsum function and the simulated daily log returns.  
+  
+# 2.4.4 McDonald's Stock  
+```{r}
+data = read.csv("MCD_PriceDaily.csv")
+head(data)
+adjPrice = data[, 7]
+```
+
+**Problem 12:  Compute the returns and log returns and plot them against each other. As discussed in Sect. 2.1.3, does it seem reasonable that the two types of daily returns are approximately equal?**    
+```{r}
+n = length(adjPrice)
+MCDreturn = adjPrice[-1] / adjPrice[-n] - 1
+logMCDreturn = log(1+MCDreturn)
+plot(MCDreturn,logMCDreturn, main="Comparison of Return Types: MCD", xlab="Arithmetic", ylab="Log") 
+lines(MCDreturn,MCDreturn,col="gray")  
+```
+    
+  Yes, it seems reasonable that the two types of daily returns are approximately equal as the daily returns are very small (generally below 5% for a daily return).  
+  
+**Problem 13: Compute the mean and standard deviation for both the returns and the log returns. Comment on the similarities and differences you perceive in the first two moments of each random variable. Does it seem reasonable that they are the same?**  
+```{r}
+(meanMCD = round(mean(MCDreturn),6))
+(logMCD = round(mean(logMCDreturn),6))
+(sdMCD = round(sd(MCDreturn),6))
+(sdlogMCD = round(sd(logMCDreturn),6))
+```
+  The mean and standard deviation of the McDonald's returns are **`r meanMCD`** and **`r sdMCD`**, respectively.  Similarly, the mean and standard deviation of the log returns are **`r logMCD`** and **`r sdlogMCD`**, respectively.  These are very similar to 4 decimal places.  This makes sense since returns are small for McDonalds.  The maximum daily return magnitude is well under 5%.  \
+  
+**Problem 14: Perform a t-test to compare the means of the returns and the log returns. Comment on your findings.**   
+```{r}
+t.test(MCDreturn, logMCDreturn, paired = TRUE, conf.level = 0.95 )
+```
+  
+ I **reject the null hypothesis** that the mean returns are the same using a 5% significance level.  The p-value is very low at 2.2e-16, which is below our 5% level, so there is significant evidence that the two return means are not the same.  A paired t-test is used as log returns are simply a transformation of the original return data and are not another independent return data set.  For a paired t-test, the assumption is that the two data sets are not independent.  Both returns and log-returns are very highly correlated and thus are not independent so a paired t-test should be used.  If the return data were independent, an independent t-test would need to be run, which results in not rejecting the null hypothesis that the mean returns are different.  
+  
+**Problem 15: After looking at return and log return data for McDonald’s, are you satisfied that for small values, log returns and returns are interchangeable?**  
+  
+ Yes, for small values, log returns seem sufficient to use in place of returns.  
+  
+  
+**Problem 17: After coming back to your friend with an unwillingness to make the bet, he asks you if you are willing to try a slightly different deal. This time the offer stays the same as before, except he would pay an additional $25 if the price ever fell below $84.50. You still only pay him $1 for losing. Do you now make the bet**
+```{r}
+niter = 10000 # number of iterations, given in Problem 16
+below85 = rep(0, niter) # set up storage for the $100 bet
+below84 = rep(0, niter) # set up storage for the second $25 bet
+set.seed(2015)  # again given in Problem 16
+for (i in 1:niter){
+logr = rnorm(20, mean = logMCD, sd = sdlogMCD) # generate random numbers
+logPrice = log(93.07) + cumsum(logr)
+minlogP = min(logPrice) # minimum price over next 20 days
+below85[i] = as.numeric(minlogP < log(85))
+below84[i] = as.numeric(minlogP < log(84.5))
+}
+(payout = 100*mean(below85) + 25*mean(below84) - 1*(1-sum(below85)/10000))  
+```
+  The payout is expected to be approximately **`r payout`.**  This isn't a high payout but it is positive, so I would make the bet (assuming I'm not risk averse which we aren't considering here).  
+  
+# 2.5 Exercises  
+**Question 1a: What is the probability that after one trading day your investment is worth less than $990?**  
+```{r}
+return1 = log(1+((990-1000)/1000))
+(prob1 = round(pnorm(return1, mean = .001, sd = .015),6))
+```
+  The probability that the investment is worth less than $990 using log returns is **`r prob1`.**  
+  
+**Question 1b: What is the probability that after five trading days your investment is worth less than $990?**  
+```{r}
+(prob2 = round(pnorm(return1, mean = .005, sd = sqrt(5)*.015),6))  
+```
+  The probability that the investment is worth less than $990 using log returns is **`r prob2`**.  
+   
+**Problem 4: Suppose the prices of a stock at times 1, 2, and 3 are P1 = 95, P2 = 103, and P3 = 98. Find r3(2).**     
+
+  From equation (1.3) in Handout 1 we have $r_3(2) = r_3 + r_2$.
+```{r}
+r2 =log(103/95)
+r3 = log(98/103)
+(r3of2 = round(r2 + r3,6))
+```
+  $r_3(2)$ = **`r r3of2`**.
+
