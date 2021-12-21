@@ -1,5 +1,5 @@
 # FIN
-Statistical Methods in Finance
+Statistical Methods in Finance.  
 All work was completed in R markdown.
 
 # Project List
